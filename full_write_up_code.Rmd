@@ -1,0 +1,986 @@
+---
+title: "Predicting Solar Panel Adoption"
+author: "Donnie Meyer"
+date: "November 1, 2018"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+setwd("/home/donniemeyer32085/git/capstone/solar_surveys/")
+library(knitr)
+library(vcdExtra)
+library(tidyverse)
+library(kableExtra)
+library(caTools)
+library(ROCR)
+library(car)
+library(aod)
+library(memisc)
+library(jtools)
+df <- read_csv("df.csv")
+ACGPS_factors <- read_csv("ACGPS_factors.csv")
+#education level vs. solar adoption (ordinal)
+educ_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$education)
+dimnames(educ_tab) <- list(Adoption = c("No_Solar", "Solar"), Education = c("HH_less", "some_college", "college", "MA_more"))
+educ_tab
+#state vs. solar adoption (nominal)
+state_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$STATE)
+dimnames(state_tab) <- list(Adoption = c("No_Solar", "Solar"), State = c("NJ", "NY", "AZ", "CA"))
+state_tab
+#age vs. solar adoption (ordinal)
+age_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$age)
+dimnames(age_tab) <- list(Adoption = c("No_Solar", "Solar"), Age = c("18-44", "45-54", "55-64", "65 or older"))
+age_tab
+#gender vs. solar adoption (nominal)
+gender_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$GENDER)
+dimnames(gender_tab) <- list(Adoption = c("No_Solar", "Solar"), Gender = c("Male", "Female", "No_Answer"))
+gender_tab
+#sqft foot binned (ordinal)
+sqft_house_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$sqft_house)
+dimnames(sqft_house_tab) <- list(Adoption = c("No_Solar", "Solar"), House_Size = c("1500_less", "1501_1000", "2001_2500", "2500_more"))
+sqft_house_tab
+#FINANCIAL (ordinal)
+financial_situation_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$financial_situation)
+dimnames(financial_situation_tab) <- list(Adoption = c("No_Solar", "Solar"), Financial_Well_Being = c("Comtorable", "Meet_Expenses", "Just_Meet_Exp", "Dont_Meet_Exp"))
+financial_situation_tab
+#three or more children living in house (nominal)
+three_people_house_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$three_people_house)
+dimnames(three_people_house_tab) <- list(Adoption = c("No_Solar", "Solar"), Three_Or_More_HH = c("False", "True"))
+three_people_house_tab
+#children under 18 (nominal)
+child_under_18_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$child_under_18)
+dimnames(child_under_18_tab) <- list(Adoption = c("No_Solar", "Solar"), Have_Children = c("No", "Yes"))
+child_under_18_tab
+#retired (nominal)
+retired_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$retired)
+dimnames(retired_tab) <- list(Adoption = c("No_Solar", "Solar"), Retired = c("No", "Yes"))
+retired_tab
+#political stance (nominal)
+political_party_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$political_party)
+dimnames(political_party_tab) <- list(Adoption = c("No_Solar", "Solar"), Party = c("Very_liberal", "Liberal", "Moderate", "Conservative", "Very_Conservative", "Other", "Not_Political"))
+political_party_tab
+##income vs. solar adoption (ordinal)
+income_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$INCOME_BINNED)
+dimnames(income_tab) <- list(Adoption = c("No_Solar", "Solar"), Income = c("less_50", "50_74", "75_99", "100_149", "150_more", "No_Answer"))
+income_tab
+
+########################################## TWO WAY LIKERT TABLES ##############################
+
+########################################## ECONOMIC VARIABLES
+#winter bill (likert, ordinal) 
+winter_bill_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$winter_bill)
+dimnames(winter_bill_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("less_25", "25-49", "50-74", "75-99", "100-149", "150-199", "200-249", "250-299", "300-349", "350-399", "400_more"))
+#summer bill (likert, ordinal) 
+summer_bill_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$summer_bill)
+dimnames(summer_bill_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("less_25", "25-49", "50-74", "75-99", "100-149", "150-199", "200-249", "250-299", "300-349", "350-399", "400_more"))
+#slow_energy prices (likert, ordinal) 
+slow_energy_price_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$slow_energy_price)
+dimnames(slow_energy_price_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+# return_investment (likert, ordinal)
+return_investment_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$return_investment)
+dimnames(return_investment_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#save_money (likert, ordinal)
+save_money_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$save_money)
+dimnames(save_money_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+
+########################################### ETHICS VARIABLES 
+#protect_environment (likert, ordinal) 
+protect_environment_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$protect_environment)
+dimnames(protect_environment_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+# respect_earth (likert, ordinal) 
+respect_earth_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$respect_earth)
+dimnames(respect_earth_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#unity_nature (likert, ordinal) 
+unity_nature_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$unity_nature)
+dimnames(unity_nature_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#world_peace (likert, ordinal) 
+world_peace_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$world_peace)
+dimnames(world_peace_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#social_justice (likert, ordinal) 
+social_justice_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$social_justice)
+dimnames(social_justice_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#equality (likert, ordinal) 
+equality_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$equality)
+dimnames(equality_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#respect_elders (likert, ordinal) 
+respect_elders_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$respect_elders)
+dimnames(respect_elders_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#family_security (likert, ordinal) 
+family_security_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$family_security)
+dimnames(family_security_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#self_discipline (likert, ordinal) 
+self_discipline_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$self_discipline)
+dimnames(self_discipline_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+
+########################################### PERSONALITY VARIABLES
+#right_to_lead (likert, ordinal)
+right_to_lead_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$right_to_lead)
+dimnames(right_to_lead_tab) <- list(Adoption = c("No_Solar", "Solar"), Response =c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#influential (likert, ordinal)
+influential_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$influential)
+dimnames(influential_tab) <- list(Adoption = c("No_Solar", "Solar"), Response =c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#wealth (likert, ordinal)
+wealth_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$wealth)
+dimnames(wealth_tab) <- list(Adoption = c("No_Solar", "Solar"), Response =c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#varied_life (likert, ordinal)
+varied_life_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$varied_life)
+dimnames(varied_life_tab) <- list(Adoption = c("No_Solar", "Solar"), Response =c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#exciting_life (likert, ordinal)
+exciting_life_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$exciting_life)
+dimnames(exciting_life_tab) <- list(Adoption = c("No_Solar", "Solar"), Response =c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#curious (likert, ordinal)
+curious_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$curious)
+dimnames(curious_tab) <- list(Adoption = c("No_Solar", "Solar"), Response =c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+
+########################################### CONSUMER TRAITS
+#ask_someone_brand  (likert, ordinal)
+ask_someone_brand_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$ask_someone_brand)
+dimnames(ask_someone_brand_tab) <- list(Adoption = c("No_Solar", "Solar"), Response = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+#ask_someone_service  (likert, ordinal)
+ask_someone_service_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$ask_someone_service)
+dimnames(ask_someone_service_tab) <- list(Adoption = c("No_Solar", "Solar"), Response = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+#trust_opinions  (likert, ordinal)
+trust_opinions_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$trust_opinions)
+dimnames(trust_opinions_tab) <- list(Adoption = c("No_Solar", "Solar"), Response = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+#look_new_products  (likert, ordinal)
+look_new_products_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$look_new_products)
+dimnames(look_new_products_tab) <- list(Adoption = c("No_Solar", "Solar"), Response = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+#new_experience_products  (likert, ordinal)
+new_experience_products_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$new_experience_products)
+dimnames(new_experience_products_tab) <- list(Adoption = c("No_Solar", "Solar"), Response = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+#visit_places_products  (likert, ordinal)
+visit_places_products_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$visit_places_products)
+dimnames(visit_places_products_tab) <- list(Adoption = c("No_Solar", "Solar"), Response = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+
+########################################### EVIRONMENTAL BELIEFS
+#renewable_energy (likert, ordinal) 
+renewable_energy_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$renewable_energy)
+dimnames(renewable_energy_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#climate_change (likert, ordinal) 
+climate_change_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$climate_change)
+dimnames(climate_change_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#waste_energy (likert, ordinal) 
+waste_energy_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$waste_energy)
+dimnames(waste_energy_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#climate_change_serious
+climate_change_serious_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$climate_change_serious)
+dimnames(climate_change_serious_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#slow_climate_change
+slow_climate_change_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$slow_climate_change)
+dimnames(slow_climate_change_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#evironment_improve
+evironment_improve_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$evironment_improve)
+dimnames(evironment_improve_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#reduce_footprint
+reduce_footprint_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$reduce_footprint)
+dimnames(reduce_footprint_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+
+```
+
+
+# Introduction
+
+There are many reasons why consumers adopt, and choose not to adopt rooftop solar. For example, some adopt for financial gain while others adopt for environmental reasons. Understanding roof top solar adoption characteristics of consumers seems to be an extremely worth while endeavor. Volatile energy prices, environmental concerns, and lack of jobs in traditional energy sectors are all problems that could be alleviated with an increase in roof top solar adoption. This project seeks to determine which factors play a significant role in the rooftop solar adoption process. The cost of manufacturing panels has decreased substantially over time, and therefore has become more affordable for average households. Although the cost of manufacturing solar panels has decreased, the cost of obtaining customers for solar panels has remained relatively high. It is likely that consumers lack knowledge of the technology, have skepticism about making the switch, are unsure of its investment return, etc. If this is the case, then a better understanding of the consumer traits that influence roof top solar adoption could help solar companies push this technology forward. Solar installation firms can use this information as it would help them pinpoint marketing strategies and in turn increase sales. Knowing which groups of consumers to target with advertising  could ultimately encourage consumers to adopt rooftop solar at a faster rate.
+
+
+# Data 
+
+### *Data Description*
+
+The name of the data set is "Understanding the Evolution of Customer Motivations and Adoption Barriers in Residential Solar Markets: Survey Data". It has been made public by the National Renewable Energy Laboratory (NREL) and can be found here  [https://data.nrel.gov/submissions/68](https://data.nrel.gov/submissions/68).
+
+For this project a survey data set will be used where all features are categorical, i.e. there are no continuous variables. The data is a compilation of three surveys titled an adopter survey, a considerer survey, and a general population survey. The adopter survey is limited to households who have adopted solar, the considerer survey is limited to households who have seriously considered adopting solar but have yet to do so, and the general population survey is limited to those who have never seriously considered solar. The surveys where conducted in California, Arizona, New York, and New Jersey. The general population survey is limited to households that are single family homes that are owned by the residents who occupy them. These households are more likely than other households to adopt rooftop solar making it possible to compare across groups(adopters and non-adopters). 
+
+The main features that will be used are  composed of nominal and ordinal variables. Most variables are ordinal and many are represented in likert form questions such as "Do you believe installing solar panels will save you money?" where respondents have the choices strongly agree, agree, neutral, disagree, and strongly disagree. The nominal variables are mainly demographic characteristics such as gender, age, education, etc. The variables have been broken up into the six categories which are Demographics, Economics, Ethics, Consumer traits, Personality traits , and Environmental variables. Two categories did not make it into the final analysis because they had no statistical relationship with the dependent variable. These two categories were the Personality and Ethics categories. *HAVESOLAR* is a survey question asking "Do you currently have roof top solar installed at your current home?" and is the dependent variable in this project. 
+
+### *Data Wrangling*
+
+The first step was to append the three data sets. The data sets were combined keeping only those columns (survey questions) that where common across all three surveys. This allows for comparisons across groups because each group is answering the exact same questions. This eliminated about 200 variables leaving 49 in my final data set. Though many features where lost, the remaining 49 where the most relevant as these will allow for comparison across adopters and non-adopters. A small amount of recoding was performed on the dependent variable *HAVESOLAR*. One important note is that I decided to put people who had rooftop solar in the past but had moved to a new home without rooftop solar, into the group who had it. The thinking here is that this group is probably more similar to rooftop solar adopters than those who had not adopted, as they had adopted in the past.
+
+The data is fairly clean, but there are quite a few NA's and some values that are large relative to the rest of the data. For example many questions contain responses such as "I don't know" and "prefer not to answer" that are equal to 98 and 95 respectively. There are many values equal to 99 in the data that was later discovered to be NA as well. The value of 99 was spread over multiple columns and rows. The r-package *naniar* has a function called replace_with_na_all(). This function will go through each column and find the value you assign, in my case 99, and replace each of those values with NA. The NA's are left in the data set as opposed to using complete.cases() because most columns only have between 0-2 percent NA's. Removing the NA's would have eliminated 25% of the rows in my data. I also recoded the value of 98 ("I don't know) to NA's because this is similar to "No_Answer" and made little difference in the final analysis. Removing 98 from a specific set of variables allowed for the creation of ordered factors. 
+
+The next step was to rename the variables and convert each column into factor variables. I took on the burdensome task of renaming all my variables so that they were more descriptive. Though burdensome, a value of "climate_change"" as opposed to "PN1"" is much more informative and saves me time in the long run as opposed to looking up a variable every time in the code book. There is now at least a good sense of what this variable represents. A factor data set was created by converting all integers to factors and ordered factors. The final data sets structure is below. This is the full data set with all features. The final data set will contain only 18 features that are correlated with the dependent variable *HAVESOLAR*. 
+
+
+```{r, echo=FALSE, comment=NA}
+glimpse(ACGPS_factors %>% mutate_if(is.integer, as.ordered))
+```
+
+
+# Explaratory Data Analysis (EDA)
+
+To select features for this project I used visualization techniques, independence tests, and measures of association. Due to the nature of the data being categorical, different tests of independence and association were required depending on whether the variable was nominal or ordinal. Using these strategies I identified 18 variables that were statistically dependent with *HAVESOLAR* and at a minimum weakly associated with it. The variable *HAVESOLAR* is the dependent variable in this research and is equal to 1 if solar was was adopted and equal to 0 otherwise.
+
+### *Adopeters vs. Non_Adopters by Demographics*
+
+Solar adopters and non-adopters are compared below by demographic factors. The adopters are on the right with a value of 1 and the non-adopters are on the left with a value of 0. Visualizing the two groups by there demographics can reveal insightful information about how the groups are similar and how they differ. 
+
+The two groups have very similar distributions with respect to education and political party. This suggests that these factors most likely are not playing a role in whether a consumer adopts solar or not. Though these bar plots are suggestive of not playing a role, we will confirm this with tests of independence and measures of association later in the paper. 
+
+
+```{r, fig.align='center', echo=FALSE, fig.width = 8, fig.height = 3}
+ACGPS_factors %>% 
+  ggplot(aes(x = factor(education))) +
+  geom_bar(color = "green", aes(y = (..count..)/sum(..count..))) +
+  facet_wrap(~ HAVESOLAR) +
+  scale_x_discrete(labels = c("HH_less", "some_college", "college", "MA_more")) +
+  ylab("Relative Frequency") + xlab("Education")
+ACGPS_factors %>% 
+  ggplot(aes(x = factor(political_party))) +
+  geom_bar(color = "red", aes(y = (..count..)/sum(..count..))) +
+  facet_wrap(~ HAVESOLAR) +
+  scale_x_discrete(labels = c("V_L", "L", "M", "C", "V_C", "Oth", "Not_P")) +
+    ylab("Relative Frequency") + xlab("Political Party")
+```
+
+
+The two groups also display very different distributions with respect to age, gender, income, and the state in which they live. These variables will most likely be more useful as predictors of rooftop solar adoption. We can make some quick observations such as there are more male solar adopters, more younger people who have not adopted solar, more poor people who have not adopted solar, and more people from California who have adopted solar. These demographic differences between these distributions do a good job jumping out you, implying further investigation. 
+
+
+```{r, fig.align='center', echo=FALSE, fig.width = 8, fig.height = 3}
+ACGPS_factors %>% 
+  ggplot(aes(x =factor(GENDER))) +
+  geom_bar(color = "yellow", aes(y = (..count..)/sum(..count..))) +
+  facet_wrap(~ HAVESOLAR) +
+  scale_x_discrete(labels = c("Male", "Female", "No_Answer")) +
+    ylab("Relative Frequency") + xlab("Gender")
+ACGPS_factors %>% 
+  ggplot(aes(x = factor(age))) +
+  geom_bar(color = "blue", aes(y = (..count..)/sum(..count..))) +
+  facet_wrap(~ HAVESOLAR) +
+  scale_x_discrete(labels = c("18-44", "45-54", "55-64", "65 or older")) +
+    ylab("Relative Frequency") + xlab("Age")
+ACGPS_factors %>% 
+  ggplot(aes(x = factor(INCOME_BINNED))) +
+  geom_bar(color = "purple", aes(y = (..count..)/sum(..count..))) +
+  facet_wrap(~ HAVESOLAR) +
+  scale_x_discrete(labels = c("less_50", "50_74", "75_99", "100_149", "150_more", "No_Answer")) +
+    ylab("Relative Frequency") + xlab("Income")
+ACGPS_factors %>% 
+  ggplot(aes(x = factor(STATE))) +
+  geom_bar(color = "orange", aes(y = (..count..)/sum(..count..))) +
+  facet_wrap(~ HAVESOLAR) +
+  scale_x_discrete(labels = c("NJ", "NY", "AZ", "CA")) +
+    ylab("Relative Frequency") + xlab("State")
+```
+
+
+
+### *Likert Questions*
+
+Another way to get a feel for the data is to visualize survey responses in the form of stacked bar charts. I have subjectively selected three questions to visualize as an example. One question is from the economics category, one from the consumer category, and one from the environmental category. The three survey questions are listed below.
+
+
+###### *Using solar will help protect my family from rising electricity prices in the future*
+
+Here we see that about 55% of people who strongly agree adopted solar while only 20% have not adopted. It appears that there is large differences in the way people feel about solar panel adoption protecting rising energy prices in the future. Characteristics that display large differences should be investigated further. 
+
+
+```{r, fig.align='center', echo=FALSE, fig.width = 15, fig.height = 3}
+#slow energy price
+slow_energy_price_tib <- as.tibble(slow_energy_price_tab)
+colnames(slow_energy_price_tib) <- c("HAVESOLAR",  "slow_price", "COUNT")
+slow_energy_price_prop <- slow_energy_price_tib %>%  mutate(Response = COUNT/sum(COUNT)) %>% arrange(desc(slow_price))
+slow_energy_price_prop$slow_price <- factor(slow_energy_price_prop$slow_price,  ordered = TRUE, levels = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+ggplot(slow_energy_price_prop, aes(x=HAVESOLAR, y=Response, fill=slow_price)) + 
+  geom_col(position = "fill") +
+  coord_flip()
+```
+
+
+###### *Before I buy a new product or service, I often ask acquaintances about their experiences with that product*
+
+This survey question has results that are interesting about consumer behavior. Those who have adopted solar inquire less with others about their experience with that product or service, as compared to non-adopters. We see that 55% of non-adopters responded that this is "Quite Alot Like ME" as compared to 35% of adopters. It could be that those who adopt solar are more self reliant than those who do not.  
+
+
+```{r, fig.align='center', echo=FALSE, fig.width = 15, fig.height = 3}
+ask_someone_service_tib <- as.tibble(ask_someone_service_tab)
+colnames(ask_someone_service_tib) <- c("HAVESOLAR",  "Ask_Service", "COUNT")
+ask_someone_service_prop <- ask_someone_service_tib %>%  mutate(Response = COUNT/sum(COUNT)) %>% arrange(desc(Ask_Service))
+ask_someone_service_prop$Ask_Service <- factor(ask_someone_service_prop$Ask_Service,  ordered = TRUE, levels = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+ggplot(ask_someone_service_prop, aes(x=HAVESOLAR, y=Response, fill=Ask_Service)) + 
+  geom_col(position = "fill") +
+  coord_flip()
+```
+
+
+###### *I feel a personal obligation to do my part to move the country to a renewable energy future.*
+
+This question is not surprising and suggests that consumers who are concerned about the environment adopt solar at a higher rate.
+
+
+```{r, fig.align='center', echo=FALSE, fig.width = 15, fig.height = 3}
+#renewable_energy
+renewable_energy_tib <- as.tibble(renewable_energy_tab)
+colnames(renewable_energy_tib) <- c("HAVESOLAR",  "RE_Important", "COUNT")
+renewable_energy_prop <- renewable_energy_tib %>%  mutate(Response= COUNT/sum(COUNT)) %>% arrange(desc(RE_Important))
+renewable_energy_prop$RE_Important <- factor(renewable_energy_prop$RE_Important,  ordered = TRUE, levels = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+ggplot(renewable_energy_prop, aes(x=HAVESOLAR, y=Response, fill=RE_Important)) + 
+  geom_col(position = "fill") +
+  coord_flip()
+```
+
+
+Examining survey responses in this fashion help identify which variables  have explanatory power over the dependent variable. The three variables above definitely show differences in opinions between adopters and non-adopters. 
+
+Visualizing the demographic distributions and survey responses in the form of stacked bar charts is a good starting point to understanding the data, but it can only take us so far. More advanced statistical techniques will be conducted that help us determine what factors are most important for roof top solar adoption. 
+
+
+### *Contingency Tables*
+
+Contingency tables are a great way to display the relationship between two variables. As an example, the variable that had the highest correlation with the response variable, *save_money* to demonstrate the process that took place to select features. The *save_money* variable is a survey response question that asked "Using solar would save me money". The respondent had the choices Strongly Agree, Agree, Neutral, Disagree, and Strongly Disagree. A two way contingency table of *save_money* and *HAVESOLAR* is displayed below. 
+
+
+```{r, echo=FALSE}
+#save_money (likert, ordinal)
+save_money_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$save_money)
+dimnames(save_money_tab) <- list( Adoption = c("No_Solar", "Solar"), Using_solar_would_save_me_money = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+save_money_tab %>% knitr::kable(caption = "Using solar would save me money") %>% kable_styling(latex_options = "hold_position")
+```
+
+
+It appears that people who increasingly agree that solar saves money adopt solar at a higher rate. Contingency tables allow the researcher to test the independence between two variables. This is done with independence test such as Pearson's Chi Square for nominal variables and Cochran-Mantel-Haenszel for ordinal variables. The null hypothesis is rejected if the p-value is less than 0.05, implying that there is indeed a statistical relationship between the variables. 
+
+
+### *Mosaic Plots*
+
+Visualizing mosaic plots is a very informative way to look for relationships between categorical variables and determining the direction of the relationship. Mosaic plots represent a contingency table, where the association between two variables can be inspected. Each box represents a conditional relative frequency from a contingency table. A box with color (blue/red) represents positive and negative Pearson's residuals which is the difference between the observed observation and the expected observation. If the box is dull or gray, its telling us that the two groups are probably independent.
+
+Here we can see that individuals who strongly agree own more solar panels than those groups who agree less. There appears to be a positive relationship between beliefs that solar saves money and solar panel ownership. This variable appears to have explanatory power over solar panel adoption, and will be confirmed with independence tests and measures of association. 
+
+```{r, fig.align='center', echo=FALSE}
+str_save_money <- structable(t(save_money_tab))
+mosaic(str_save_money, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,0,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+```
+
+
+Below is a two way contingency table and mosaic plot of a variable that appears to have no impact over solar panel adoption below. The variable is political party, which was deemed unimportant when we compared the distributions. We can do this more formally here. It appears that political affiliation has no predictive power over solar panel adoption. Each box in the plot is grey indicating that there is independence between political party and solar panel adoption. For this reason, it most likely will not be included. Again we will perform statistical independence tests to confirm our suspicions.  
+
+
+
+```{r, fig.align='center', echo=FALSE}
+political_party_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$political_party)
+dimnames(political_party_tab) <- list(Adoption = c("No_Solar", "Solar"), Party = c("Very_liberal", "Liberal", "Moderate", "Conservative", "Very_Conservative", "Other", "Not_Political"))
+political_party_tab %>% kable(caption = "Politcal Party") %>% kable_styling(latex_options = "hold_position")
+```
+
+
+```{r, fig.align='center', echo=FALSE}
+str_political_party <- structable(t(political_party_tab))
+mosaic(str_political_party, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+```
+
+
+### *Tests of Independence and Association*
+
+For nominal data the Pearson's Chi-Square to test the independence between groups. Pearson's Chi-Square tests the null hypothesis that the two groups are independent where we reject the null if the p-value is less than 0.05. One draw back is the Chi-Square test is that it is sensitive to sample size. For example, if we increase our sample size the Chi-Square test statistic will also increase. We can use a measure of association called Cramers V, which is not sensitive to sample size, that tells us how strong the relationship between our groups are. Cramers V ranges from 0-1 with values closer to 0 indicative of no association and closer to 1 indicative of a strong association.
+
+With ordinal data there may be a linear trend. The Cochran-Mantel-Haenszel test can be used to test the independence between ordinal variables. We reject the null hypothesis of independence if the p-value is less than 0.05. The value **cor** in the CHMtest is the linear by linear test which ranges from -1 to 1. 0 means that the two groups are independent, while a value of 1 is a perfect positive relationship, and values at -1 is a perfect negative relationship. The GKgamma function in R is a measure of association for ordinal data which tests the strength of relationship as well as its direction. The value of gamma ranges from -1 to 1 with a value of zero indicating no relationship. 
+
+We have been looking at the relationship between *HAVESOLAR* and *save_money* which is an ordinal variable. Therefore, the CHMtest to test for independence and the GKgamma the measure of association. Here we reject the null hypothesis of independence as the cor p-value is very small and conclude that there is a strong positive relationship with a gamma value of0.645. This will be a good variable to use when building the model. 
+
+
+```{r, echo = FALSE, comment=NA}
+CMHtest(save_money_tab)
+GKgamma(save_money_tab)
+```
+
+
+The other variable we have been looking at is the political_party variable. This is a nominal variable so I use the Chi-Square test to test independence and Cramers for the measure of association. Here we have a p-value of 0.01046 which is not less than 0.05. We cannot reject the null hypothesis of independence. Cramers V has a value of 0.069 which is very close to 0, meaning there appears to be no association between political party and solar panel adoption. 
+
+
+```{r, echo=FALSE, comment=NA}
+chisq.test(political_party_tab)
+assocstats(political_party_tab)
+```
+
+
+### *Feature Selection*
+
+The process just described of creating a contingency table, evaluating a mosaic plot, testing for independence, and tests for  association was the process used to select features for the model. This process was conducted for all features in the data set. In the end, 18 variables were hand selected that will be used to build the model. In the [Appendix], I have presented all contingency tables, mosaic plots, and the statistical tests for the variables that will be used in the modeling process. Below is a list of the four categories of variables included in the analysis. Each variable lists the original name from the data set, the new name used in the analysis, and what type of variable it is i.e. ordinal or nominal. 
+
+
+######Demographic Variables
+* GENDER - GENDER, nominal                              
+* AGE_BINNED - age, ordinal                                                
+* STATE - STATE, nominal                               
+* INCOME_BINNED, ordinal                                         
+
+######Economic Variables
+* WINTER_NOPV_BINNED - winter_bill, ordinal                          
+* SUMMER_NOPV_BINNED - summer_bill, ordinal                           
+* BTE8 - slow_energy_price, ordinal                           
+* BE13 - return_investment, ordinal                              
+* BE10 - save_money, ordinal, ordinal                                 
+
+######Consumer Variables
+* CIJM1 - ask_someone_brand, ordinal                               
+* CIJM2 - ask_someone_service, ordinal                                
+* CIJM3 - trust_opinions, ordinal                                    
+* CNS1 - look_new_products, ordinal                                   
+* CNS2 - new_experience_products, ordinal                                      
+* CNS3 - visit_places_products, ordinal                              
+
+######Environmental Variables
+* PN1 - renewable_energy, ordinal                           
+* BB1 - environment_improve, ordinal                                 
+* BB2 - slow_climate_change, ordinal                                          
+* BB3 - reduce_footprint, ordinal                                             
+
+
+
+
+# Model
+
+
+##### *Baseline Method*
+
+First lets find the standard base line method. For a classification problem, we predict the most frequent outcome for all observations. We see here that the base line model has an accuracy of 54 percent. A logistic regression model will be built in attempt to beat the base line prediction.
+
+```{r, echo = FALSE, comment=NA}
+depTab <- table(df$HAVESOLAR)
+dimnames(depTab) <- list(Adoption = c("No_Solar", "Solar"))
+depTab
+1907/(1907+1626)
+```
+
+##### *Dependent Variable*
+
+The graph below displays the distribution of the dependent variable *HAVESOLAR*. The sample is slightly unbalanced and gives us a visual of the baseline method. When we split the data into the training and test data sets, each data set will maintain this distribution of the dependent variable. In other words, both the training set and the test set will have 54% non-adopters and 46% adopters.  
+
+
+```{r echo=FALSE, fig.align='center', fig.height=3, fig.width=5}
+ACGPS_factors %>% 
+  ggplot(aes(x = as.factor(HAVESOLAR), fill = as.factor(HAVESOLAR))) +
+  geom_bar(aes(y = (..count..)/sum(..count..))) + 
+  scale_fill_manual(name="Type", values=c("green4", "cyan4"), labels=c("no_solar", "solar")) +
+  ylab("Relative Frequency") + xlab("HAVESOLAR")
+```
+
+
+##### *Training and Test Data*
+
+Next we create training and test data sets. The sample.split() function will be used which is part of the catools package in R. The first argument is the dependent variable, and second argument is the percentage of data we want in the training set. This also makes sure that the outcome variable is well balanced, as mentioned previously. The training data will consist of 75% of the original data with the remaining 25% saved for the test data. 
+
+
+```{r, echo = FALSE}
+set.seed(32085)
+df <- na.omit(df)
+split <- sample.split(df$HAVESOLAR, SplitRatio = 0.75)
+dfTrain <- subset(df, split == TRUE)
+dfTest <- subset(df, split == FALSE)
+```
+
+
+Here we view the two data sets and notice that they both have the same number of columns/variables but differ in row counts. We will use the training data to build the model, and then see how our model predicts solar adoption on the test data. 
+
+**Training data**
+
+
+```{r, echo = FALSE, comment = NA}
+glimpse(dfTrain)
+```
+
+
+**Test Data**
+
+
+```{r, echo = FALSE, comment = NA}
+glimpse(dfTest)
+```
+
+
+##### *Logistic Regression*
+
+Logistic regression predicts the probability of an outcome variable being true. The logistic regression model will predict the probability that the consumer has adopted solar i.e. P(y=1). P(y=0) = 1 - P(y=1) where the P(y=0) is the probability the consumer has not adopted solar. Positive parameter estimates are predictive of class 1, while negative values are predictive of class 0. For example, a positive value increases the probability that HAVESOLAR = 1 or that a consumer has adopted solar. 
+
+The first model will include the 18 selected features from the data set. I include all selected features in the first model since we rejected the null hypothesis of independence for each one and the dependent variable *HAVESOLAR*. The models are located in the appendix due to their length and you can view them here **[Appendix]**. After running the first model, the goal will be to check the model for multicollinearity and then perform statistical significance test to determine which variables should be removed from the model. In the process of doing this, the AIC value will be evaluated. 
+
+
+```{r, echo= FALSE, comment=NA}
+#logistic regression
+logit_train_1 <- glm(factor(HAVESOLAR) ~
+                 ordered(INCOME_BINNED) +
+                 factor(GENDER) +
+                 ordered(age) +
+                 factor(STATE) +
+                 ordered(winter_bill) +
+                 ordered(summer_bill) +
+                 ordered(slow_energy_price) +
+                 ordered(return_investment) +
+                 ordered(save_money) +
+                 ordered(ask_someone_brand) +
+                 ordered(ask_someone_service) +
+                 ordered(trust_opinions) +
+                 ordered(look_new_products) +
+                 ordered(new_experience_products) +
+                 ordered(visit_places_products) +
+                 ordered(renewable_energy) +
+                 ordered(slow_climate_change) +
+                 ordered(reduce_footprint), data = dfTrain, family = "binomial")
+```
+
+
+##### *Detecting Multicollinarity*
+
+A VIF of 1 means that there is no correlation among the predictor and the remaining predictor variables, and hence the variance is not inflated at all. The general rule of thumb is that VIFs exceeding 4 warrant further investigation, while VIFs exceeding 10 are signs of serious multicollinearity requiring a correction. As you can see below, there are many variables that have a VIF greater than 4 and some greater than 10. This is not surprising as many of the variables where survey questions that were very similar. Its not hard to image that some of these variables are strongly correlated. Coefficients with VIF values over 10 will be removed. Ideally I would like to get the VIF values below 4 without significantly increasing the AIC value. 
+
+
+```{r, echo = FALSE, comment = NA}
+# detecting and dealing with multicullinarity
+vif_1 <- vif(glm(factor(HAVESOLAR) ~
+                 ordered(INCOME_BINNED) +
+                 factor(GENDER) +
+                 ordered(age) +
+                 factor(STATE) +
+                 ordered(winter_bill) +
+                 ordered(summer_bill) +
+                 ordered(slow_energy_price) +
+                 ordered(return_investment) +
+                 ordered(save_money) +
+                 ordered(ask_someone_brand) +
+                 ordered(ask_someone_service) +
+                 ordered(trust_opinions) +
+                 ordered(look_new_products) +
+                 ordered(new_experience_products) +
+                 ordered(visit_places_products) +
+                 ordered(renewable_energy) +
+                 ordered(slow_climate_change) +
+                 ordered(reduce_footprint), data = dfTrain, family = "binomial"))
+vif_1 %>%  kable(caption = "VIF Values") %>% kable_styling(latex_options = "hold_position")
+```
+
+
+In table 3 we can see there are three VIF values well over 10. The three variables are from the consumer category. It makes sense to keep the one that has the strongest measure of association with the dependent variable, so two will be removed. It appears that the *ask_someone_service* variable is more correlated than the *ask_someone_brand* and *new_experience_product* variables, therefore I will remove the latter two. The AIC value in model 1 is 1543, and in model 2 where the *ask_someone_brand* and *new_experience_product* variable are removed, the AIC value remained unchanged. Therefore, this is a significant improvement to the model. You can compare model 1 and model 2 in the **[Appendix]**.
+
+
+
+
+
+
+```{r, echo= FALSE, comment=NA}
+#logistic regression
+logit_train_2 <- glm(factor(HAVESOLAR) ~
+                 ordered(INCOME_BINNED) +
+                 factor(GENDER) +
+                 ordered(age) +
+                 factor(STATE) +
+                 ordered(winter_bill) +
+                 ordered(summer_bill) +
+                 ordered(slow_energy_price) +
+                 ordered(return_investment) +
+                 ordered(save_money) +
+                 ordered(ask_someone_service) +
+                 ordered(trust_opinions) +
+                 ordered(look_new_products) +
+                 ordered(visit_places_products) +
+                 ordered(renewable_energy) +
+                 ordered(slow_climate_change) +
+                 ordered(reduce_footprint), data = dfTrain, family = "binomial")
+```
+
+
+We now see all the VIF values are well below 10 so we have definitely removed multicollinearity from the model. We can attempt to further remove variables that look suspicious and compare the models. We go through two more series where we remove variables until the VIF values are below 4. During this process we generated model 3  in the **[Appendix]**. Model 3 had the largest jump in AIC value increasing to 1583. The final VIF values are in table 4, where all variables have a VIF below 4. 
+
+
+```{r, echo = FALSE, comment = NA}
+# detecting and dealing with multicullinarity
+vif_3 <- vif(glm(factor(HAVESOLAR) ~
+                 ordered(INCOME_BINNED) +
+                 factor(GENDER) +
+                 ordered(age) +
+                 factor(STATE) +
+                 ordered(winter_bill) +
+                 ordered(save_money) +
+                 ordered(ask_someone_service) +
+                 ordered(look_new_products) +
+                 ordered(renewable_energy) +
+                 ordered(slow_climate_change), data = dfTrain, family = "binomial"))
+vif_3 %>%  kable(caption = "VIF Values") %>% kable_styling(latex_options = "hold_position")
+```
+
+
+```{r, echo= FALSE, comment=NA}
+#logistic regression
+logit_train_3 <- glm(factor(HAVESOLAR) ~
+                 ordered(INCOME_BINNED) +
+                 factor(GENDER) +
+                 ordered(age) +
+                 factor(STATE) +
+                 ordered(winter_bill) +
+                 ordered(save_money) +
+                 ordered(ask_someone_service) +
+                 ordered(look_new_products) +
+                 ordered(renewable_energy) +
+                 ordered(slow_climate_change), data = dfTrain, family = "binomial")
+```
+
+
+##### *Wald Test* 
+
+We can test for the overall significance for each categorical variable using the Wald Test. In the table below we see that the only variable that is insignificant is the *slow_climate_change* variable. 
+
+
+```{r, echo = FALSE, comment=NA}
+#wald test for all model coefficeints
+Anova(logit_train_3, test.statistic = "Wald")
+```
+
+
+After removing the variable *slow_climate_change* from the model we again use the Wald Test and find that all of our categorical predictors are statistically significant. This new set of variables will generate model 4 in the **[Appendix]**.
+
+
+```{r, echo= FALSE, comment=NA}
+#logistic regression
+logit_train_4 <- glm(factor(HAVESOLAR) ~
+                 ordered(INCOME_BINNED) +
+                 factor(GENDER) +
+                 ordered(age) +
+                 factor(STATE) +
+                 ordered(winter_bill) +
+                 ordered(slow_energy_price) +
+                 ordered(save_money) +
+                 ordered(ask_someone_service) +
+                 ordered(look_new_products) +
+                 ordered(visit_places_products) +
+                 ordered(renewable_energy), data = dfTrain, family = "binomial")
+```
+
+
+```{r, echo = FALSE, comment=NA}
+#wald test for all model coefficeints
+Anova(logit_train_4, test.statistic = "Wald")
+```
+
+
+For simplicity, the rest of the report will use model 4 as it is the simplest model, has all statistically significant predictors, has no multicollinearity, and its AIC value is only slightly higher than models 1 and 2. 
+
+
+# Model Evaluation and Prediction Performance
+
+
+##### *Summary of Predicted Values*
+
+Lets see if we are predicting higher probability for HAVESOLAR = 1, and lower probability for HAVESOLAR = 0. We are predicting an average probability of 0.72 for HAVESOLAR = 1 and 0.22 for HAVESOLAR = 0. This a good sign because we are predicting a higher probability for the actual HAVESOLAR = 1 cases. 
+
+
+```{r, echo=FALSE, warning=FALSE, comment=NA}
+# make predictions on the trainig set, predictions are in probablities
+predictTrain <- predict(logit_train_4, data = dfTrain, type = "response")
+summary(predictTrain)
+tapply(predictTrain, dfTrain$HAVESOLAR, mean)
+```
+
+ 
+##### *Confussion Matrix*
+
+Next we will evaluate a confusion matrix. A confusion matrix compares actual outcomes to predicted outcomes. The classification matrix is composed of true negative (TN) cases, true positive (TP) cases, false negative(FN) cases, and false positive (FP) cases. TN cases predict *HAVESOLAR* = 1 and the case is *HAVESOLAR* = 0, TP cases predict *HAVESOLAR* = 1 and the case is *HAVESOLAR* = 1, FN cases predict *HAVESOLAR* = 0 and the case is *HAVESOLAR* = 0, and FP predict *HAVESOLAR* = 0 and the case is *HAVESOLAR* = 1. 
+
+In order to build a confusion matrix we have to choose a threshold value **t**. Since our predictions are between 0 and 1 the threshold value **t** should be between 0 and 1. Values great than **t** will predict **HAVESOLAR** = 1 and values below **t** will predict *HAVESOLAR* = 0. Below is the confusion matrix. The rows are the actual values of *HAVESOLAR* and the columns are the predicted values of *HAVESOLAR*. As you can see the first row and column of the matrix is the TP rate, the number of cases we predicted *HAVESOLAR* = 1 where the case is *HAVESOLAR* = 1. 
+
+```{r, echo=FALSE, warning=FALSE, comment=NA}
+# threshold value and confusion matrices, classification tables, specificty and sensitivity
+conf_1 <- table(dfTrain$HAVESOLAR, predictTrain > 0.5)
+dimnames(conf_1) <- list(Actual_HAVESOLAR = c("Actual = 0", "Actual = 1"), Predict_HAVESOLAR = c("Predicted = 0", "Predicted = 1"))
+conf_1 %>% kable(caption = "Predict HAVESOLAR, t = 0.5", ) %>% kable_styling(latex_options = "hold_position")
+```
+
+From the confusion matrix we can calculate various measures. I will focus on sensitivity, specificity, and over all accuracy. 
+
+**sensitivity** - the percentage of TRUE cases classified correctly
+```{r, echo=FALSE, warning=FALSE, comment=NA}
+668/(165+668) 
+```
+
+**specificity** - the percentage of FALSE cases classified correctly
+```{r, echo=FALSE, warning=FALSE, comment=NA}
+908/(908+145)
+```
+
+**overall accuracy** - the percentage of overall cases classified correctly
+```{r, echo=FALSE, warning=FALSE, comment=NA}
+(908+668)/(908+145+668+165)
+```
+
+
+The model with a threshold of **t** = 0.5 has an overall all accuracy of 84%, with a sensitivity of 80%, and a specificity of 86%. Which threshold should we choose for our predictions? In the next section we cover the ROC curve which can help a researcher determine the value of **t**. 
+
+
+##### *ROC Curve*
+
+The ROC curve has a true-positive rate on the y-axis and a false positive rate on the x-axis. **t** = 1 is at the point (0,0) while **t** = 0 is at the point (1,1). The ROC curve is a performance measure of a classification model at all thresholds **t**. This provides information to the researcher in selecting a threshold **t** depending on the preferences for specificity and sensitivity measures. In our case we are not concerned with having a specific sensitivity or specificity rate so we will use another method to choose our **t** value. We will however use the ROC to calculate the AUC value. 
+
+
+```{r, warning=FALSE, comment=NA, fig.align='center', echo=FALSE}
+# ROC curves, helps determine threshold value
+par(oma=c(3,3,3,3))
+par(mfrow=c(1,1))
+rocr_pred <- prediction(predictTrain, dfTrain$HAVESOLAR)
+rocr_perf <- performance(rocr_pred, "tpr", "fpr")
+plot(rocr_perf, colorize = TRUE, print.cutoffs.at = seq(0,1,0.1), text.adj = c(-0.2, 1.7))
+```
+
+
+##### *Calculating the Threshold*
+
+We will use a measure that maximizes the overall accuracy. R allows us to calculate the accuracy, the cutoff, and the ability to visualize this.  Below is a plot to help us determine our threshold value **t**.
+
+
+```{r, fig.align='center', echo=FALSE, fig.width = 5.5, fig.height = 3.5}
+# accuracy performance
+perf_acc <- performance(rocr_pred, measure = "acc")
+plot(perf_acc)
+
+ind = which.max( slot(perf_acc, "y.values")[[1]] )
+acc = slot(perf_acc, "y.values")[[1]][ind]
+cutoff = slot(perf_acc, "x.values")[[1]][ind]
+print(c(accuracy= acc, cutoff = cutoff))
+```
+
+
+```{r, echo=FALSE, warning=FALSE, comment=NA}
+# threshold value and confusion matrices, classification tables, specificty and sensitivity
+conf_2 <- table(dfTrain$HAVESOLAR, predictTrain > 0.512)
+dimnames(conf_2) <- list(Actual_HAVESOLAR = c("Actual = 0", "Actual = 1"), Predict_HAVESOLAR = c("Predicted = 0", "Predicted = 1"))
+conf_2 %>% kable(caption = "Predict HAVESOLAR, t = 0.51", ) %>% kable_styling(latex_options = "hold_position")
+```
+
+
+##### *AUC*
+
+The AUC provides an aggregate measure of performance across all possible classification thresholds. It measures the probability that a random TRUE value, in our case *HAVESOLAR* = 1, is to the right of a random NEGATIVE value *HAVESOLAR* = 0. We have an AUC of 0.9011, so 90% of the time our random true value is to the right of our random negative value. A simpler interpretation is that when the AUC is 0 we have predicted none of our values, and when the AUC is 1 we predict 100 % of our values correctly.
+
+
+```{r, echo=FALSE, comment=NA, message=FALSE}
+library(pROC)
+roc_obj <- roc(dfTrain$HAVESOLAR, predictTrain)
+auc(roc_obj)
+```
+
+
+# Using Model on Test Set
+
+##### *Summary of Predicted Values*
+We first compare the statistical summary of the predicted results from the training data and the test data, using model 4. We see that the measures are very close indicating our model is doing a good job of predicting *HAVESOLAR* in the test data. 
+
+
+```{r, echo=FALSE, warning=FALSE, comment=NA}
+# compute out of sample metrics on the test data set
+predictTest <- predict(logit_train_4, type = "response", newdata = dfTest)
+summary(predictTest)
+summary(predictTrain)
+```
+
+
+
+
+
+##### *Confusion Matrix*
+
+Lets next examine the confusion matrix as we did with the training data. We see that our model is performing well on the test data with an overall accuracy of 82%. 
+
+
+```{r, echo=FALSE, warning=FALSE, comment=NA}
+test_tab <- table(dfTest$HAVESOLAR, predictTest > 0.5)
+dimnames(test_tab) <- list(Actual_HAVESOLAR = c("Actual = 0", "Actual = 1"), Predict_HAVESOLAR = c("Predicted = 0", "Predicted = 1"))
+test_tab %>% kable(caption = "Predict HAVESOLAR, t = 0.5", ) %>% kable_styling(latex_options = "hold_position")
+```
+
+
+**sensitivity** - the percentage of TRUE cases classified correctly
+```{r, echo=FALSE, warning=FALSE, comment=NA}
+297/(297+54)
+```
+
+
+**specificity** - the percentage of FALSE cases classified correctly
+```{r, echo=FALSE, warning=FALSE, comment=NA}
+218/(218+60)
+```
+
+
+**overall accuracy** - the percentage of overall cases classified correctly
+```{r, echo=FALSE, warning=FALSE, comment=NA}
+(297+218)/(297+218+54+60)
+```
+
+##### *Test Set Precition Accuracy*
+
+
+We have an AUC of 89% so our model seems to be performing well. The model is predicting 89% of the *HAVESOLAR* = 1 cases correctly.
+
+
+```{r, echo=FALSE, warning=FALSE, comment=NA}
+#auc for test data
+roc_obj_test <- roc(dfTest$HAVESOLAR, predictTest)
+auc(roc_obj_test)
+```
+
+# *Reccomendations*
+
+It is apparent that economic factors play the strongest role in rooftop solar adoption. The final model had the two predictors **save_money** and **slow_energy_price** which had the strongest correlation with the dependent variable *HAVESOLAR*. Each had a positive relationship with rooftop solar adoption. Adopters believe that rooftop solar saves them money and protects them from rising energy prices in the future. Solar companies should continue to educate potential customers about the economic benefits of adopting rooftop solar. This can be done through advertising, social media, information on websites etc. 
+
+Predictors from the consumer category **included ask_some_service**, **look_new_products**, and **visit_places_products**. Surprisingly these all shared a negative relationship with *HAVESOLAR*. For example, those who described themselves as "not like me at all" for the question "I continually look for new products" adopted solar more than those who described themselves as "Just like me". The same goes for **ask_someone_service** which asked "Do you ask others about their experiences with products before you purchase the product" and **visit_places_product** which asked "do you visit places to find new products". This implies that solar adopters are not actively looking or seeking new products. Potential solar adopters may be harder to reach through traditional advertising strategies. Efforts to reach these customers may be essential to increase solar adoption and more research should be done by solar companies to understand this behavior. 
+
+The two variables *summer_bill* and *winter_bill* where positively associated with solar adoption. Solar companies should target areas where electricity bills are higher than average and solar generation potential is high. This can be done with increased advertising and increased development to create more exposure to potential solar panel consumers. Electricity bills are a important topic because consumers find it easy to understand savings when using this information. Information should be made available about how consumers will lower monthly utility bills when adopting solar.  
+
+Environmental reasons also play a factor. The most highly correlated factor from the environmental category was **renewable_energy**, though factors where correlated with *HAVESOLAR**. Solar companies should maintain an image of being green. This may encourage those who already know of the financial benefits to ultimately make the switch. It may be that consumers need more than one reason that is important to them when making such a large investment.  
+
+Some demographics are important while others are not. Surprisingly education levels and political party played no role in solar adoption. Other demographic factors did however play a role. For example, men adopted solar more than females, California adopted solar more than the other states, older aged consumers adopted solar more than younger consumers, and consumers with higher incomes adopted more solar than lower income consumers. When developing marketing strategies keep these demographic factors in mind. 
+
+# Appendix
+
+# Model Summary
+**[Model]**
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, comment = NA}
+library(kableExtra)
+mtable123 <- mtable("Model 1" = logit_train_1,
+                                       "Model 2" = logit_train_2, 
+                                       "Model 3" = logit_train_3,
+                                       "Model 4" = logit_train_4, summary.stats=c("AIC", "N"))
+mtable123
+```
+
+
+# Contingency Tables
+
+```{r, echo=FALSE}
+#state vs. solar adoption (nominal)
+state_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$STATE)
+dimnames(state_tab) <- list(Adoption = c("No_Solar", "Solar"), State = c("NJ", "NY", "AZ", "CA"))
+state_tab %>% knitr::kable(caption = "State") %>% kable_styling(latex_options = "hold_position")
+#age vs. solar adoption (ordinal)
+age_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$age)
+dimnames(age_tab) <- list(Adoption = c("No_Solar", "Solar"), Age = c("18-44", "45-54", "55-64", "65 or older"))
+age_tab %>% knitr::kable(caption = "Age") %>% kable_styling(latex_options = "hold_position")
+#gender vs. solar adoption (nominal)
+gender_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$GENDER)
+dimnames(gender_tab) <- list(Adoption = c("No_Solar", "Solar"), Gender = c("Male", "Female", "No_Answer"))
+gender_tab %>% knitr::kable(caption = "Gender") %>% kable_styling(latex_options = "hold_position")
+#income
+income_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$INCOME_BINNED)
+dimnames(income_tab) <- list(Adoption = c("No_Solar", "Solar"), Income = c("less_50", "50_74", "75_99", "100_149", "150_more", "No_Answer"))
+income_tab %>% knitr::kable(caption = "Income") %>% kable_styling(latex_options = "hold_position")
+#save_money (likert, ordinal)
+save_money_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$save_money)
+dimnames(save_money_tab) <- list( Adoption = c("No_Solar", "Solar"), Save_Money = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+save_money_tab %>% knitr::kable(caption = "Using solar would save me money") %>% kable_styling(latex_options = "hold_position")
+#slow_energy prices (likert, ordinal) 
+slow_energy_price_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$slow_energy_price)
+dimnames(slow_energy_price_tab) <- list( Adoption = c("No_Solar", "Solar"), Slow_Energy_Price = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+slow_energy_price_tab %>% knitr::kable(caption = "Using solar will protect my family from rising energy prices") %>% kable_styling(latex_options = "hold_position")
+#winter bill (likert, ordinal) 
+winter_bill_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$winter_bill)
+dimnames(winter_bill_tab) <- list( Adoption = c("No_Solar", "Solar"), Winter_Bill = c("less_25", "25-49", "50-74", "75-99", "100-149", "150-199", "200-249", "250-299", "300-349", "350-399", "400_more"))
+winter_bill_tab %>% knitr::kable(caption = "How much do you spend on your electricity bill during winter months") %>% kable_styling(latex_options = "hold_position")
+#ask_someone_service  (likert, ordinal)
+ask_someone_service_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$ask_someone_service)
+dimnames(ask_someone_service_tab) <- list(Adoption = c("No_Solar", "Solar"), Ask_Someone_Service = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+ask_someone_service_tab %>% knitr::kable(caption = "You ask others about their experiences before buying a new product") %>% kable_styling(latex_options = "hold_position")
+#look_new_products  (likert, ordinal)
+look_new_products_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$look_new_products)
+dimnames(look_new_products_tab) <- list(Adoption = c("No_Solar", "Solar"), Look_New_Products = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+look_new_products_tab %>% knitr::kable(caption = "I continually look for new products") %>% kable_styling(latex_options = "hold_position")
+#visit_places_products  (likert, ordinal)
+visit_places_products_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$visit_places_products)
+dimnames(visit_places_products_tab) <- list(Adoption = c("No_Solar", "Solar"), Visit_Places_Products = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+visit_places_products_tab %>% knitr::kable(caption = "I like to visit new places to learn about new products") %>% kable_styling(latex_options = "hold_position")
+#renewable_energy (likert, ordinal) 
+renewable_energy_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$renewable_energy)
+dimnames(renewable_energy_tab) <- list( Adoption = c("No_Solar", "Solar"), Renewable_Energy = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+visit_places_products_tab %>% knitr::kable(caption = "I feel obligated to move the country towards renewable energy") %>% kable_styling(latex_options = "hold_position")
+```
+
+# Mosaic Plots and Independence Tests/ Associataion
+
+```{r, fig.align='center', echo=FALSE}
+#state vs. solar adoption (nominal)
+str_state <- structable(t(state_tab))
+mosaic(str_state, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+chisq.test(state_tab)
+assocstats(state_tab)
+#age vs. solar adoption (ordinal)
+str_age <- structable(t(age_tab))
+mosaic(str_age, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(age_tab)
+GKgamma(age_tab)
+#gender vs. solar adoption (nominal)
+str_gender <- structable(t(gender_tab))
+mosaic(str_gender, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+fisher.test(gender_tab)
+assocstats(gender_tab)
+#INCOME_BINNED vs. solar adoption (nominal)
+str_income <- structable(t(income_tab))
+mosaic(str_income, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(income_tab)
+GKgamma(income_tab)
+#winter bill (likert, ordinal) 
+str_winter_bill <- structable(t(winter_bill_tab))
+mosaic(str_winter_bill, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,0,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(winter_bill_tab)
+GKgamma(winter_bill_tab)
+#slow_energy_price (likert, ordinal) 
+str_slow_energy_price <- structable(t(slow_energy_price_tab))
+mosaic(str_slow_energy_price, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,0,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(slow_energy_price_tab)
+GKgamma(slow_energy_price_tab)
+#save_money (likert, ordinal)
+str_save_money <- structable(t(save_money_tab))
+mosaic(str_save_money, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,0,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(save_money_tab)
+GKgamma(save_money_tab)
+#ask_someone_service (likert, ordinal)
+str_ask_someone_service <- structable(t(ask_someone_service_tab))
+mosaic(str_ask_someone_service, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(ask_someone_service_tab)
+GKgamma(ask_someone_service_tab)
+#look_new_products  (likert, ordinal)
+str_look_new_products <- structable(t(look_new_products_tab))
+mosaic(str_look_new_products, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(look_new_products_tab)
+GKgamma(look_new_products_tab)
+#visit_places_products  (likert, ordinal)
+str_visit_places_products <- structable(t(visit_places_products_tab))
+mosaic(str_visit_places_products, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(visit_places_products_tab)
+GKgamma(visit_places_products_tab)
+#renewable_energy (likert, ordinal)
+str_renewable_energy <- structable(t(renewable_energy_tab))
+mosaic(str_renewable_energy, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,0,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(renewable_energy_tab)
+GKgamma(renewable_energy_tab)
+```

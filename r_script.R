@@ -46,7 +46,7 @@ ACGPS <- ACGPS %>%arrange(CASE_ID)
 
 #################################################### DEPENDENT VARIABLE ######################################################
 
-### CREATE DEPENDENT VARIABLE, 1 = HAVE SOLAR AND 0 = DOES NOT HAVE SOLAR
+### CREATE DEPENDENT VARIABLE, 1 = HAVE SOLAR AND 0 = DOES NOT HAVE SOLAR ###
 ACGPS <- ACGPS %>% filter(!HAVESOLAR %in% 50)
 
 
@@ -943,3 +943,4 @@ table(dfTest$HAVESOLAR, predictTest > 0.5)
 #auc for test data
 roc_obj_test <- roc(dfTest$HAVESOLAR, predictTest)
 auc(roc_obj_test)
+

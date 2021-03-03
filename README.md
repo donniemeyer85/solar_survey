@@ -1,3 +1,1 @@
-# solar_survey
-Solar survey data science project in R
-This was catagorical data!
+This repository is for the purpose of storing code and other files for the solar panel data survey project.
