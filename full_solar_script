@@ -1,0 +1,945 @@
+############################################################# LIBRARIES #########################################################################
+#catagorical data
+library(vcdExtra)
+#data import, wrangle, cleaning, tidying and visulization
+library(tidyverse)
+#creating traing and test data
+library(caTools)
+#ROC curves
+library(ROCR)
+#dealing with multiculinarity
+library(car)
+#dealing with NA's
+library(naniar)
+#wald.test
+library(aod)
+
+########################################### IMPORT WRANGLE CLEAN TIDY #####################################################################
+setwd("/home/donniemeyer32085/git/capstone/solar_surveys/")
+
+### ADOPTER DATA SET ### 
+A <- read.csv("ADOPTER.csv")
+A$HAVESOLAR <- dplyr::recode(A$HAVESOLAR, `1` = 1, `2` = 50, `3` = 1, `4` = 50)
+
+### CONSIDERER DATA SET  ### 
+C <- read.csv("CONSIDERER.csv")
+C$HAVESOLAR <- dplyr::recode(C$HAVESOLAR, `1` = 50, `2` = 0, `3` = 50, `4` = 1, `5` = 50)
+
+### APPENED A and C DATA SETS ###
+bind1 <- A[, names(A) %in% names(C)]
+bind2 <- C[, names(C) %in% names(A)]
+AC <- rbind(bind1, bind2)
+
+### GPS DATA SET ###
+GPS <- read.csv("GPS.csv")
+GPS$HAVESOLAR <- rep(0, nrow(GPS))
+
+### APPENED AC and GPS DATA SETS ###
+bind3 <- AC[, names(AC) %in% names(GPS)]
+bind4 <- GPS[, names(GPS) %in% names(AC)]
+ACGPS <- rbind(bind3, bind4)
+rm(A, C, AC, GPS, bind1, bind2, bind3, bind4)
+
+### Arrange by caseid ### 
+ACGPS <- ACGPS %>%arrange(CASE_ID)
+
+
+#################################################### DEPENDENT VARIABLE ######################################################
+
+### CREATE DEPENDENT VARIABLE, 1 = HAVE SOLAR AND 0 = DOES NOT HAVE SOLAR
+ACGPS <- ACGPS %>% filter(!HAVESOLAR %in% 50)
+
+
+##################################################### HANDLING NA's ############################################################
+
+
+### Make value of 99 eqaul to NA, 99 is indicated in the codebook to be missing values ###
+ACGPS <- ACGPS %>% replace_with_na_all(condition = ~.x == 99)
+#for some reason after changing 99 to NA, HAVESOLAR becomes a dbl
+ACGPS$HAVESOLAR <- as.integer(ACGPS$HAVESOLAR) 
+ACGPS <- ACGPS %>% replace_with_na_all(condition = ~.x == 98)
+
+
+################################################## DROPPING AND RENAMING ###################################################
+
+### Drop unuseful features, survey source unimportant and home has more than 50% NA. The study states that all houeses 
+#where single family homes ###
+ACGPS <-  select(ACGPS, -SURVEY_SOURCE, -HOME)
+
+write.csv(x = ACGPS, file = "ACGPS.csv")
+
+### Rename Variables ###
+ACGPS <- ACGPS %>% 
+  rename(
+    winter_bill = WINTER_NOPV_BINNED ,
+    summer_bill = SUMMER_NOPV_BINNED ,
+    slow_energy_price = BTE8 ,
+    return_investment = BE13 ,
+    save_money = BE10 ,
+    sqft_house = SQFT_BINNED , 
+    financial_situation = FINANCIAL ,
+    three_people_house = PEOPLE_TOT_3PLUS ,
+    child_under_18 = HAVE_KIDS ,
+    GENDER = GENDER,
+    age = AGE_BINNED  ,
+    education = EDUC_BINNED  ,
+    retired = RETIRED , 
+    renewable_energy = PN1  ,
+    climate_change = PN2 , 
+    waste_energy = PN3 , 
+    protect_environment = VB1  ,
+    respect_earth = VB2  ,
+    unity_nature = VB3 , 
+    world_peace = VA1  ,
+    social_justice = VA2 , 
+    equality = VA3 , 
+    respect_elders = VT1  ,
+    family_security = VT2 , 
+    self_discipline = VT3  ,
+    political_party = STANCE  ,
+    right_to_lead = VE1  ,
+    influential = VE2  ,
+    wealth = VE4  ,
+    varied_life = VO1  ,
+    exciting_life = VO2  ,
+    curious = VO3 ,
+    ask_someone_brand = CIJM1  ,
+    ask_someone_service = CIJM2  ,
+    trust_opinions = CIJM3  ,
+    look_new_products = CNS1 ,
+    new_experience_products = CNS2 ,
+    visit_places_products = CNS4 , 
+    climate_change_serious = E2 , 
+    evironment_improve = BB1  ,
+    slow_climate_change = BB2 , 
+    reduce_footprint = BB3  )
+
+#################################################### SAVE ACGPS AS INTEGERS #########################################################
+# Save data set
+write.csv(x = ACGPS, file = "ACGPS_int.csv")
+
+################################################### FACTOR DATASET ###########################################################
+#change all the character columns to factors
+ACGPS_factors <- ACGPS %>% mutate_if(is.integer, as.ordered)
+
+# change unordered factors to factors and CASE_ID to int (three_people_house, child_under_18, GENDER, retired, politcal_party)
+ACGPS_factors$CASE_ID <- as.integer(ACGPS_factors$CASE_ID)
+ACGPS_factors$three_people_house <- factor(ACGPS_factors$three_people_house, ordered = FALSE)
+ACGPS_factors$child_under_18 <- factor(ACGPS_factors$child_under_18, ordered = FALSE)
+ACGPS_factors$GENDER <- factor(ACGPS_factors$GENDER, ordered = FALSE)
+ACGPS_factors$retired <- factor(ACGPS_factors$retired, ordered = FALSE)
+ACGPS_factors$political_party <- factor(ACGPS_factors$political_party, ordered = FALSE)
+ACGPS_factors$HAVESOLAR <- factor(ACGPS_factors$HAVESOLAR, ordered = FALSE)
+ACGPS_factors$GPS_NAC_ADOPTER <- factor(ACGPS_factors$GPS_NAC_ADOPTER, ordered = FALSE)
+ACGPS_factors$STATE <- factor(ACGPS_factors$STATE, ordered = FALSE)
+
+#check number of levels for all factor variables ()
+ACGPS_factors %>%
+  summarise_if(is.factor, nlevels)
+#check numbers of levels and what the value of levels are 
+nlevels(ACGPS_factors$HAVESOLAR)
+levels(ACGPS_factors$HAVESOLAR)
+# Make a two column dataset with variable names and number of levels
+number_of_levels <- ACGPS_factors %>% 
+  summarise_all(nlevels) %>%
+  gather(variable, num_levels)
+
+# Save data set
+write.csv(x = ACGPS_factors, file = "ACGPS_factors.csv")
+
+
+########################################### TWO WAY TABLES #######################################################################################################################################################
+
+########################################### TWO WAY DEMOGRAPHIC TABLES ####################
+#education level vs. solar adoption (ordinal)
+educ_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$education)
+dimnames(educ_tab) <- list(Adoption = c("No_Solar", "Solar"), Education = c("HH_less", "some_college", "college", "MA_more"))
+educ_tab
+#state vs. solar adoption (nominal)
+state_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$STATE)
+dimnames(state_tab) <- list(Adoption = c("No_Solar", "Solar"), State = c("NJ", "NY", "AZ", "CA"))
+state_tab
+#age vs. solar adoption (ordinal)
+age_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$age)
+dimnames(age_tab) <- list(Adoption = c("No_Solar", "Solar"), Age = c("18-44", "45-54", "55-64", "65 or older"))
+age_tab
+#gender vs. solar adoption (nominal)
+gender_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$GENDER)
+dimnames(gender_tab) <- list(Adoption = c("No_Solar", "Solar"), Gender = c("Male", "Female", "No_Answer"))
+gender_tab
+#sqft foot binned (ordinal)
+sqft_house_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$sqft_house)
+dimnames(sqft_house_tab) <- list(Adoption = c("No_Solar", "Solar"), House_Size = c("1500_less", "1501_1000", "2001_2500", "2500_more"))
+sqft_house_tab
+#FINANCIAL (ordinal)
+financial_situation_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$financial_situation)
+dimnames(financial_situation_tab) <- list(Adoption = c("No_Solar", "Solar"), Financial_Well_Being = c("Comtorable", "Meet_Expenses", "Just_Meet_Exp", "Dont_Meet_Exp"))
+financial_situation_tab
+#three or more children living in house (nominal)
+three_people_house_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$three_people_house)
+dimnames(three_people_house_tab) <- list(Adoption = c("No_Solar", "Solar"), Three_Or_More_HH = c("False", "True"))
+three_people_house_tab
+#children under 18 (nominal)
+child_under_18_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$child_under_18)
+dimnames(child_under_18_tab) <- list(Adoption = c("No_Solar", "Solar"), Have_Children = c("No", "Yes"))
+child_under_18_tab
+#retired (nominal)
+retired_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$retired)
+dimnames(retired_tab) <- list(Adoption = c("No_Solar", "Solar"), Retired = c("No", "Yes"))
+retired_tab
+#political stance (nominal)
+political_party_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$political_party)
+dimnames(political_party_tab) <- list(Adoption = c("No_Solar", "Solar"), Party = c("Very_liberal", "Liberal", "Moderate", "Conservative", "Very_Conservative", "Other", "Not_Political"))
+political_party_tab
+##income vs. solar adoption (ordinal)
+income_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$INCOME_BINNED)
+dimnames(income_tab) <- list(Adoption = c("No_Solar", "Solar"), Income = c("less_50", "50_74", "75_99", "100_149", "150_more", "No_Answer"))
+income_tab
+
+########################################## TWO WAY LIKERT TABLES ##############################
+
+########################################## ECONOMIC VARIABLES
+#winter bill (likert, ordinal) 
+winter_bill_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$winter_bill)
+dimnames(winter_bill_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("less_25", "25-49", "50-74", "75-99", "100-149", "150-199", "200-249", "250-299", "300-349", "350-399", "400_more"))
+#summer bill (likert, ordinal) 
+summer_bill_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$summer_bill)
+dimnames(summer_bill_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("less_25", "25-49", "50-74", "75-99", "100-149", "150-199", "200-249", "250-299", "300-349", "350-399", "400_more"))
+#slow_energy prices (likert, ordinal) 
+slow_energy_price_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$slow_energy_price)
+dimnames(slow_energy_price_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+# return_investment (likert, ordinal)
+return_investment_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$return_investment)
+dimnames(return_investment_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#save_money (likert, ordinal)
+save_money_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$save_money)
+dimnames(save_money_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+
+########################################### ETHICS VARIABLES 
+#protect_environment (likert, ordinal) 
+protect_environment_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$protect_environment)
+dimnames(protect_environment_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+# respect_earth (likert, ordinal) 
+respect_earth_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$respect_earth)
+dimnames(respect_earth_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#unity_nature (likert, ordinal) 
+unity_nature_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$unity_nature)
+dimnames(unity_nature_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#world_peace (likert, ordinal) 
+world_peace_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$world_peace)
+dimnames(world_peace_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#social_justice (likert, ordinal) 
+social_justice_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$social_justice)
+dimnames(social_justice_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#equality (likert, ordinal) 
+equality_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$equality)
+dimnames(equality_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#respect_elders (likert, ordinal) 
+respect_elders_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$respect_elders)
+dimnames(respect_elders_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#family_security (likert, ordinal) 
+family_security_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$family_security)
+dimnames(family_security_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#self_discipline (likert, ordinal) 
+self_discipline_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$self_discipline)
+dimnames(self_discipline_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+
+########################################### PERSONALITY VARIABLES
+#right_to_lead (likert, ordinal)
+right_to_lead_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$right_to_lead)
+dimnames(right_to_lead_tab) <- list(Adoption = c("No_Solar", "Solar"), Response =c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#influential (likert, ordinal)
+influential_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$influential)
+dimnames(influential_tab) <- list(Adoption = c("No_Solar", "Solar"), Response =c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#wealth (likert, ordinal)
+wealth_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$wealth)
+dimnames(wealth_tab) <- list(Adoption = c("No_Solar", "Solar"), Response =c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#varied_life (likert, ordinal)
+varied_life_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$varied_life)
+dimnames(varied_life_tab) <- list(Adoption = c("No_Solar", "Solar"), Response =c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#exciting_life (likert, ordinal)
+exciting_life_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$exciting_life)
+dimnames(exciting_life_tab) <- list(Adoption = c("No_Solar", "Solar"), Response =c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+#curious (likert, ordinal)
+curious_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$curious)
+dimnames(curious_tab) <- list(Adoption = c("No_Solar", "Solar"), Response =c("OpposedToValues", "NotAtAllImportant", "SlightlyImportant", "SomeWhatImportant", "VeryImportant", "ExtremelyImportant"))
+
+########################################### CONSUMER TRAITS
+#ask_someone_brand  (likert, ordinal)
+ask_someone_brand_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$ask_someone_brand)
+dimnames(ask_someone_brand_tab) <- list(Adoption = c("No_Solar", "Solar"), Response = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+#ask_someone_service  (likert, ordinal)
+ask_someone_service_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$ask_someone_service)
+dimnames(ask_someone_service_tab) <- list(Adoption = c("No_Solar", "Solar"), Response = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+#trust_opinions  (likert, ordinal)
+trust_opinions_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$trust_opinions)
+dimnames(trust_opinions_tab) <- list(Adoption = c("No_Solar", "Solar"), Response = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+#look_new_products  (likert, ordinal)
+look_new_products_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$look_new_products)
+dimnames(look_new_products_tab) <- list(Adoption = c("No_Solar", "Solar"), Response = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+#new_experience_products  (likert, ordinal)
+new_experience_products_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$new_experience_products)
+dimnames(new_experience_products_tab) <- list(Adoption = c("No_Solar", "Solar"), Response = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+#visit_places_products  (likert, ordinal)
+visit_places_products_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$visit_places_products)
+dimnames(visit_places_products_tab) <- list(Adoption = c("No_Solar", "Solar"), Response = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+
+########################################### EVIRONMENTAL BELIEFS
+#renewable_energy (likert, ordinal) 
+renewable_energy_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$renewable_energy)
+dimnames(renewable_energy_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#climate_change (likert, ordinal) 
+climate_change_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$climate_change)
+dimnames(climate_change_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#waste_energy (likert, ordinal) 
+waste_energy_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$waste_energy)
+dimnames(waste_energy_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#climate_change_serious
+climate_change_serious_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$climate_change_serious)
+dimnames(climate_change_serious_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#slow_climate_change
+slow_climate_change_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$slow_climate_change)
+dimnames(slow_climate_change_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#evironment_improve
+evironment_improve_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$evironment_improve)
+dimnames(evironment_improve_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+#reduce_footprint
+reduce_footprint_tab <- table(ACGPS_factors$HAVESOLAR, ACGPS_factors$reduce_footprint)
+dimnames(reduce_footprint_tab) <- list( Adoption = c("No_Solar", "Solar"), Response = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+
+
+################################### MOSAIC PLOTS AND INDEPENDENCE / ASSOCIATION TESTS ######################################################################################################################
+
+# For nominal data use chi-sqaure to test independence with chisq.test(). Chsq test 
+# tests the null hypothesis that the two groups are indepednet. Reject the null if
+# the p-value is less than 0.05. To assess the strength of the relationship use 
+# assocstats() and check cramers v. Cramers V ranges from 0-1 with closer to 0 being weak
+# and closer to one being very strong.
+
+# With ordinal data there may be a linear trend. Use CHMtest to test for independence. Reject null
+# of indepedence if p-value is less than 0.05. The value cor in  the CHMtest is the linear by linear 
+# test which ranges from -1 to 1. 0 means that the two groups are indepednet. Use the GKgamma functio
+# to test the strength of relationship.
+
+# In statistics, Goodman and Kruskal's gamma is a measure of rank correlation, i.e., 
+# the similarity of the orderings of the data when ranked by each of the quantities. 
+# It measures the strength of association of the cross tabulated data when both variables 
+# are measured at the ordinal level. It makes no adjustment for either table size or ties. 
+# Values range from −1 (100% negative association, or perfect inversion) to +1 
+# (100% positive association, or perfect agreement). 
+# A value of zero indicates the absence of association.
+
+
+####################################### DEMOGRAPHIC MOSAIC PLOTS AND TESTS ########################################################
+
+#education level vs. solar adoption (ordinal)
+str_educ <- structable(t(educ_tab))
+mosaic(str_educ, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+chisq.test(educ_tab)
+assocstats(educ_tab)
+#state vs. solar adoption (nominal)
+str_state <- structable(t(state_tab))
+mosaic(str_state, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+chisq.test(state_tab)
+assocstats(state_tab)
+#age vs. solar adoption (ordinal)
+str_age <- structable(t(age_tab))
+mosaic(str_age, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(age_tab)
+GKgamma(age_tab)
+#gender vs. solar adoption (nominal)
+str_gender <- structable(t(gender_tab))
+mosaic(str_gender, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+fisher.test(gender_tab)
+assocstats(gender_tab)
+#sqft foot binned (ordinal)
+str_sqft_house <- structable(t(sqft_house_tab))
+mosaic(str_sqft_house, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(sqft_house_tab)
+GKgamma(sqft_house_tab)
+#FINANCIAL (ordinal)
+str_financial_situation <- structable(t(financial_situation_tab))
+mosaic(str_financial_situation, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(financial_situation_tab)
+GKgamma(financial_situation_tab)
+#three or more children living in house
+str_three_people_house <- structable(t(three_people_house_tab))
+mosaic(str_three_people_house, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+chisq.test(three_people_house_tab)
+assocstats(three_people_house_tab)
+#children under 18 (nominal)
+str_child_under_18 <- structable(t(child_under_18_tab))
+mosaic(str_child_under_18, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+chisq.test(child_under_18_tab)
+assocstats(child_under_18_tab)
+#retired (nominal)
+str_retired <- structable(t(retired_tab))
+mosaic(str_retired, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+chisq.test(retired_tab)
+assocstats(retired_tab)
+#political stance (nominal)
+str_political_party <- structable(t(political_party_tab))
+mosaic(str_political_party, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+chisq.test(political_party_tab)
+assocstats(political_party_tab)
+#INCOME_BINNED vs. solar adoption (nominal)
+str_income <- structable(t(income_tab))
+mosaic(str_income, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(income_tab)
+GKgamma(income_tab)
+
+############################################## LIKERT MOSAIC PLOTS AND TESTS #############################################################
+
+############################################## ECONOMIC VARIABLES
+#winter bill (likert, ordinal) 
+str_winter_bill <- structable(t(winter_bill_tab))
+mosaic(str_winter_bill, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,0,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(winter_bill_tab)
+GKgamma(winter_bill_tab)
+#summer bill (likert, ordinal) 
+str_summer_bill <- structable(t(summer_bill_tab))
+mosaic(str_summer_bill, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,0,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(summer_bill_tab)
+GKgamma(summer_bill_tab)
+#slow_energy_price (likert, ordinal) 
+str_slow_energy_price <- structable(t(slow_energy_price_tab))
+mosaic(str_slow_energy_price, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,0,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(slow_energy_price_tab)
+GKgamma(slow_energy_price_tab)
+# return_investment (likert, ordinal)
+str_return_investment <- structable(t(return_investment_tab))
+mosaic(str_return_investment, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,0,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(return_investment_tab)
+GKgamma(return_investment_tab)
+#save_money (likert, ordinal)
+str_save_money <- structable(t(save_money_tab))
+mosaic(str_save_money, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,0,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(save_money_tab)
+GKgamma(save_money_tab)
+
+######################################### ETHICAL VARIABLES
+#protect_environment (likert, ordinal) 
+str_protect_environment <- structable(t(protect_environment_tab))
+mosaic(str_protect_environment, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(protect_environment_tab)
+GKgamma(protect_environment_tab)
+# respect_earth (likert, ordinal)
+str_respect_earth  <- structable(t(respect_earth_tab))
+mosaic(str_respect_earth , shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(respect_earth_tab)
+GKgamma(respect_earth_tab)
+#unity_nature (likert, ordinal) 
+str_unity_nature  <- structable(t(unity_nature_tab))
+mosaic(str_unity_nature, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(unity_nature_tab)
+GKgamma(unity_nature_tab)
+#world_peace (likert, ordinal) 
+str_world_peace  <- structable(t(world_peace_tab))
+mosaic(str_world_peace, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(world_peace_tab)
+GKgamma(world_peace_tab)
+#social_justice (likert, ordinal) 
+str_social_justice  <- structable(t(social_justice_tab))
+mosaic(str_social_justice, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(social_justice_tab)
+GKgamma(social_justice_tab)
+#equality (likert, ordinal) 
+str_equality  <- structable(t(equality_tab))
+mosaic(str_equality, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(equality_tab)
+GKgamma(equality_tab)
+#respect_elders (likert, ordinal) 
+str_respect_elders  <- structable(t(respect_elders_tab))
+mosaic(str_respect_elders, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(respect_elders_tab)
+GKgamma(respect_elders_tab)
+#family_security (likert, ordinal) 
+str_family_security  <- structable(t(family_security_tab))
+mosaic(str_family_security, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(family_security_tab)
+GKgamma(family_security_tab)
+#self_discipline (likert, ordinal) 
+str_self_discipline <- structable(t(self_discipline_tab))
+mosaic(str_self_discipline, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(self_discipline_tab)
+GKgamma(self_discipline_tab)
+
+################################################ PERSONALITY
+#right_to_lead (likert, ordinal)
+str_right_to_lead <- structable(t(right_to_lead_tab))
+mosaic(str_right_to_lead, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(right_to_lead_tab)
+GKgamma(right_to_lead_tab)
+#influential (likert, ordinal)
+str_influential <- structable(t(influential_tab))
+mosaic(str_influential, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(influential_tab)
+GKgamma(influential_tab)
+#wealth (likert, ordinal)
+str_wealth <- structable(t(wealth_tab))
+mosaic(str_wealth, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(wealth_tab)
+GKgamma(wealth_tab)
+#varied_life (likert, ordinal)
+str_varied_life <- structable(t(varied_life_tab))
+mosaic(str_varied_life, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(varied_life_tab)
+GKgamma(varied_life_tab)
+#exciting_life (likert, ordinal)
+str_exciting_life <- structable(t(exciting_life_tab))
+mosaic(str_exciting_life, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(exciting_life_tab)
+GKgamma(exciting_life_tab)
+
+################################################## CONSUMER TRAITS
+#ask_someone_brand (likert, ordinal)
+str_ask_someone_brand <- structable(t(ask_someone_brand_tab))
+mosaic(str_ask_someone_brand, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(ask_someone_brand_tab)
+GKgamma(ask_someone_brand_tab)
+#ask_someone_service (likert, ordinal)
+str_ask_someone_service <- structable(t(ask_someone_service_tab))
+mosaic(str_ask_someone_service, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(ask_someone_service_tab)
+GKgamma(ask_someone_service_tab)
+#trust_opinions  (likert, ordinal)
+str_trust_opinions <- structable(t(trust_opinions_tab))
+mosaic(str_trust_opinions, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(trust_opinions_tab)
+GKgamma(trust_opinions_tab)
+#look_new_products  (likert, ordinal)
+str_look_new_products <- structable(t(look_new_products_tab))
+mosaic(str_look_new_products, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(look_new_products_tab)
+GKgamma(look_new_products_tab)
+#new_experience_products  (likert, ordinal)
+str_new_experience_products <- structable(t(new_experience_products_tab))
+mosaic(str_new_experience_products, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(new_experience_products_tab)
+GKgamma(new_experience_products_tab)
+#visit_places_products  (likert, ordinal)
+str_visit_places_products <- structable(t(visit_places_products_tab))
+mosaic(str_visit_places_products, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(visit_places_products_tab)
+GKgamma(visit_places_products_tab)
+
+############## ENVIRONMENTAL BELIEFS
+#renewable_energy (likert, ordinal)
+str_renewable_energy <- structable(t(renewable_energy_tab))
+mosaic(str_renewable_energy, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,0,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(renewable_energy_tab)
+GKgamma(renewable_energy_tab)
+#climate_change (likert, ordinal) 
+str_climate_change <- structable(t(climate_change_tab))
+mosaic(str_climate_change, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(climate_change_tab)
+GKgamma(climate_change_tab)
+#waste_energy (likert, ordinal) 
+str_waste_energy <- structable(t(waste_energy_tab))
+mosaic(str_waste_energy, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,60), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(waste_energy_tab)
+GKgamma(waste_energy_tab)
+#climate_change_serious
+str_climate_change_serious <- structable(t(climate_change_serious_tab))
+mosaic(str_climate_change_serious, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(climate_change_serious_tab)
+GKgamma(climate_change_serious_tab)
+#evironment_improve
+str_evironment_improve <- structable(t(evironment_improve_tab))
+mosaic(str_evironment_improve, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(evironment_improve_tab)
+GKgamma(evironment_improve_tab)
+#slow_climate_change
+str_slow_climate_change <- structable(t(slow_climate_change_tab))
+mosaic(str_slow_climate_change, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(slow_climate_change_tab)
+GKgamma(slow_climate_change_tab)
+#reduce_footprint
+str_reduce_footprint <- structable(t(reduce_footprint_tab))
+mosaic(str_reduce_footprint, shade=TRUE, legend=FALSE, split_vertical = FALSE, rot_labels=c(0,0,90,70), labeling_args = list(
+  gp_labels = gpar(fontsize = 8, fontface = 3),
+  gp_varnames = gpar(fontsize = 10, fontface = 3)))
+CMHtest(reduce_footprint_tab)
+GKgamma(reduce_footprint_tab)
+
+#################################### EXPLORING HOW THE GROUPS ARE SIMILAR ########################################################################
+
+##### Ways in which groups are similar
+
+ACGPS_factors %>% 
+  ggplot(aes(x = education)) +
+  geom_bar(color = "green") +
+  facet_wrap(~ HAVESOLAR) +
+  scale_x_discrete(labels = c("HH_less", "some_college", "college", "MA_more"))
+
+ACGPS_factors %>% 
+  ggplot(aes(x = political_party)) +
+  geom_bar(color = "red") +
+  facet_wrap(~ HAVESOLAR) +
+  scale_x_discrete(labels = c("Very_liberal", "Liberal", "Moderate", "Conservative", "Very_Conservative", "Other", "Not_Political"))
+
+#Ways in which groups are different
+ACGPS_factors %>% 
+  ggplot(aes(x = GENDER)) +
+  geom_bar(color = "yellow") +
+  facet_wrap(~ HAVESOLAR)
+
+ACGPS_factors %>% 
+  ggplot(aes(x = age)) +
+  geom_bar(color = "grey") +
+  facet_wrap(~ HAVESOLAR)
+
+ACGPS_factors %>% 
+  ggplot(aes(x = INCOME_BINNED)) +
+  geom_bar(color = "grey") +
+  facet_wrap(~ HAVESOLAR)
+
+##################################### SELECT VARIABLES THAT ARE CORELATED WITH DEPENDENT VARIABLE #################################################
+
+df <- ACGPS_factors %>% 
+  dplyr::select( HAVESOLAR,
+                 INCOME_BINNED,
+                 GENDER,
+                 age,
+                 STATE,
+                 winter_bill,
+                 summer_bill,
+                 slow_energy_price,
+                 return_investment,
+                 save_money,
+                 ask_someone_brand,
+                 ask_someone_service,
+                 trust_opinions,
+                 look_new_products,
+                 new_experience_products,
+                 visit_places_products,
+                 renewable_energy,
+                 slow_climate_change,
+                 reduce_footprint)
+# Save data set
+write.csv(x = df, file = "df.csv")
+###################################### STACKED BAR CHARTS WITH PROPORTIONS FOR SELECTED VARIABLES #################################################
+
+#save_money
+save_money_tib <- as.tibble(save_money_tab)
+colnames(save_money_tib) <- c("HAVESOLAR",  "Save_Money", "COUNT")
+save_money_prop <- save_money_tib %>%  mutate(Response = COUNT/sum(COUNT)) %>% arrange(desc(Save_Money))
+save_money_prop$Save_Money <- factor(save_money_prop$Save_Money,  ordered = TRUE, levels = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+ggplot(save_money_prop, aes(x=HAVESOLAR, y=Response, fill=Save_Money)) + 
+  geom_col(position = "fill") +
+  coord_flip()
+
+#ask_someone_service
+ask_someone_service_tib <- as.tibble(ask_someone_service_tab)
+colnames(ask_someone_service_tib) <- c("HAVESOLAR",  "Ask_Service", "COUNT")
+ask_someone_service_prop <- ask_someone_service_tib %>%  mutate(Response = COUNT/sum(COUNT)) %>% arrange(desc(Ask_Service))
+ask_someone_service_prop$Ask_Service <- factor(ask_someone_service_prop$Ask_Service,  ordered = TRUE, levels = c("NotAtAllLikeMe", "NotMuchLikeMe", "SomeWhatLikeMe", "QuiteAlotLikeMe", "JustLikeMe"))
+ggplot(ask_someone_service_prop, aes(x=HAVESOLAR, y=Response, fill=Ask_Service)) + 
+  geom_col(position = "fill") +
+  coord_flip()
+
+#slow energy price
+slow_energy_price_tib <- as.tibble(slow_energy_price_tab)
+colnames(slow_energy_price_tib) <- c("HAVESOLAR",  "slow_price", "COUNT")
+slow_energy_price_prop <- slow_energy_price_tib %>%  mutate(Response = COUNT/sum(COUNT)) %>% arrange(desc(slow_price))
+slow_energy_price_prop$slow_price <- factor(slow_energy_price_prop$slow_price,  ordered = TRUE, levels = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+ggplot(slow_energy_price_prop, aes(x=HAVESOLAR, y=Response, fill=slow_price)) + 
+  geom_col(position = "fill") +
+  coord_flip()
+
+#renewable_energy
+renewable_energy_tib <- as.tibble(renewable_energy_tab)
+colnames(renewable_energy_tib) <- c("HAVESOLAR",  "RE_Important", "COUNT")
+renewable_energy_prop <- renewable_energy_tib %>%  mutate(Response = COUNT/sum(COUNT)) %>% arrange(desc(RE_Important))
+renewable_energy_prop$RE_Important <- factor(renewable_energy_prop$RE_Important,  ordered = TRUE, levels = c("StronglyDisagree", "Disagree", "Nuetral", "Agree", "StronglyAgree"))
+ggplot(renewable_energy_prop, aes(x=HAVESOLAR, y=Response, fill=RE_Important)) + 
+  geom_col(position = "fill") +
+  coord_flip()
+
+
+
+
+############################################ DEPENDENT VARIABLE VIIZULIZATION ###################################################
+
+
+### DEPENDENT VARIABLE ### 
+ACGPS_factors %>% 
+  ggplot(aes(x = HAVESOLAR, fill = HAVESOLAR)) +
+  geom_bar(aes(y = (..count..)/sum(..count..))) + 
+  scale_fill_manual(name="Type", values=c("green4", "cyan4"), labels=c("no_solar", "solar")) +
+  ylab("Relative Frequincies")
+
+############################################ LOGISTIC REGRESSION #############################################################
+# logistic regression predicts the probablity of outcome variable being true. The logistic 
+# regression model will predict the probablity that the consumer has adopted solar or y = 1 
+#  ie P(y=1). P(y=0) = 1 - P(y=1) where the P(y=0) is the probablity the consumer has not
+# not adopted solar. Postive values parameter estimatimates are predictive of class 1, 
+# while negative values are predictive of class 0. For example, a postive value increases 
+# the probablity that HAVESOLAR = 1 or that a consumer has adopted solar.
+
+# First lets find the standard base line method. For a classification problem, predict the 
+# most frequent outcome for all observations. 
+
+# 54 percent of people have not adopted solar, base line model has an accuracy of 54 percent
+depTab <- table(df$HAVESOLAR)
+dimnames(depTab) <- list(Adoption = c("No_Solar", "Solar"))
+depTab
+1907/(1907+1626)
+
+
+# We need to create the training data and test data
+set.seed(32085)
+
+# A visual way to check for missing data
+library(Amelia)
+missmap(df, main = "Missing values vs observed")
+
+# sample.split - first argument is dependet variable, and second argument 
+# is the percentage of data we want in the training set. This also makes sure thst the outcome
+# variable is well balanced. So in the training set set 75 % of consumers adopted solar and 
+# in the test set 75 % of consumer adopted solar. 
+df <- na.omit(df)
+split <- sample.split(df$HAVESOLAR, SplitRatio = 0.75)
+split
+
+#traing and test data sets
+dfTrain <- subset(df, split == TRUE)
+dfTest <- subset(df, split == FALSE)
+nrow(dfTrain)
+nrow(dfTest)
+
+#logistic regression
+logit_train <- glm(HAVESOLAR ~ ., data = dfTrain, family = "binomial")
+summary(logit_train)
+require(memisc)
+mtable123 <- mtable('Model 1' = logit_train,
+                    summary.stats = c('AIC','F','p','N'))
+############################################ MULTICOLINARITY #######################################################################
+# A VIF of 1 means that there is no correlation among the kth predictor and the remaining predictor 
+# variables, and hence the variance of bk is not inflated at all. The general rule of thumb is that 
+# VIFs exceeding 4 warrant further investigation, while VIFs exceeding 10 are signs of serious 
+# multicollinearity requiring correction.
+
+# detecting and dealing with multicullinarity
+vif(glm(HAVESOLAR ~ ., data = dfTrain, family = "binomial"))
+
+# logit 1 has AIC = 1542
+logit_train_1 <- glm(HAVESOLAR ~. -new_experience_products, data = dfTrain, family = "binomial")
+summary(logit_train_1)
+vif(glm(HAVESOLAR ~. -new_experience_products, data = dfTrain, family = "binomial"))
+
+#logit_2 has all values below 10, AIC equals = 1543
+logit_train_2 <- glm(HAVESOLAR ~. -new_experience_products -ask_someone_service, data = dfTrain, family = "binomial")
+summary(logit_train_2)
+vif(glm(HAVESOLAR ~. -new_experience_products -ask_someone_service, data = dfTrain, family = "binomial"))
+
+#logit_3 has AIC = 1592
+logit_train_3 <- glm(HAVESOLAR ~. -new_experience_products -ask_someone_service -save_money, data = dfTrain, family = "binomial")
+summary(logit_train_3)
+vif(glm(HAVESOLAR ~. -new_experience_products -ask_someone_service -save_money, data = dfTrain, family = "binomial"))
+
+#logit_4 has AIC = 1585
+logit_train_4 <- glm(HAVESOLAR ~. -new_experience_products -ask_someone_service -save_money -reduce_footprint, data = dfTrain, family = "binomial")
+summary(logit_train_4)
+vif(glm(HAVESOLAR ~. -new_experience_products -ask_someone_service -save_money -reduce_footprint, data = dfTrain, family = "binomial"))
+
+#logit_5 
+logit_train_5 <- glm(HAVESOLAR ~. -winter_bill -new_experience_products -ask_someone_service -save_money -reduce_footprint -slow_climate_change -ask_someone_brand, data = dfTrain, family = "binomial")
+summary(logit_train_5)
+vif(logit_train_5)
+
+###################################################### ANALYSIS OF DEVIANCE and CI's ############################################################################################
+#confidence intervals
+confint(logit_train_5)
+confint.default(logit_train_5)
+
+# We can test for an overall effect of rank variables using the wald.test function of the aod library. 
+# The order in which the coefficients are given in the table of coefficients is the same as the order of the terms in the model. 
+# This is important because the wald.test function refers to the coefficients by their order in the model. 
+wald.test(b = coef(logit_train_5), Sigma = vcov(logit_train_5), Terms = 2:6)
+wald.test(b = coef(logit_train_5), Sigma = vcov(logit_train_5), Terms = 7:8)
+
+#wald test for all model coefficeints
+Anova(logit_train_5, test.statistic = "Wald")
+anova(logit_train_5, test = "Chi")
+
+
+
+
+####################################################### PREDICTION ##################################################################################
+
+# make predictions on the trainig set, predictions are in probablities
+predictTrain <- predict(logit_train_5, data = dfTrain, type = "response")
+summary(predictTrain)
+
+# lets see if we are predicting higher probablitiys for HAVESOLAR = 1, and lower probablitites
+#  for HAVESOLAR = 0. All of the true HAVESOLAR cases we predict an average probablity of
+# 0.74 while we predict an average probablity of 0.20 for all of the false HAVESOLAR cases.
+# This a good sign because we are predicting a higher probablity for the actual HAVESOLAR = 1 cases. 
+tapply(predictTrain, dfTrain$HAVESOLAR, mean)
+
+###################################### AUC VALUE ####################################################
+# AUC provides an aggregate measure of performance across all possible classification thresholds. 
+# One way of interpreting AUC is as the probability that the model ranks a random positive example 
+# more highly than a random negative example. 
+library(pROC)
+roc_obj <- roc(dfTrain$HAVESOLAR, predictTrain)
+auc(roc_obj)
+
+
+
+###################################### CONFUSION MATRIX ###############################################################
+
+# threshold value and confusion matrices, classification tables, specificty and sensitivity
+conf_1 <- table(dfTrain$HAVESOLAR, predictTrain > 0.5)
+dimnames(conf_1) <- list(Actual_HAVESOLAR = c("Actual = 0", "Actual = 1"), Predict_HAVESOLAR = c("Predicted = 0", "Predicted = 1"))
+conf_1
+# specificty, the true negative rate and sensitivity, the true positve rate
+682/(151+682) #sensitivity
+919/(919+134) #specificity
+
+#incerease thrershold value to .7 (sensitivity < specificity)
+conf_2 <- table(dfTrain$HAVESOLAR, predictTrain > 0.7)
+dimnames(conf_2) <- list(Actual_HAVESOLAR = c("Actual = 0", "Actual = 1"), Predict_HAVESOLAR = c("Predicted = 0", "Predicted = 1"))
+conf_2
+562/(271+562) #sensitivity
+994/(994+59) #specificity
+
+#incerease thrershold value to .2 (specificity < sensitivity)
+conf_3 <- table(dfTrain$HAVESOLAR, predictTrain > 0.2)
+dimnames(conf_3) <- list(Actual_HAVESOLAR = c("Actual = 0", "Actual = 1"), Predict_HAVESOLAR = c("Predicted = 0", "Predicted = 1"))
+conf_3
+776/(57+ 776) #sensitivity
+680/(680+373) #specificity
+
+# We need to figure out which threshold we want to use.
+# How do we decide?
+
+#confusion matrix with regclass
+library(regclass)
+confusion_matrix(logit_train_5)
+
+
+
+####################################### ROC CURVE #####################################################################
+
+# ROC curves, helps determine threshold value
+par(oma=c(3,3,3,3))
+par(mfrow=c(1,1))
+rocr_pred <- prediction(predictTrain, dfTrain$HAVESOLAR)
+rocr_perf <- performance(rocr_pred, "tpr", "fpr")
+plot(rocr_perf)
+plot(rocr_perf, colorize = TRUE, print.cutoffs.at = seq(0,1,0.1), text.adj = c(-0.2, 1.7))
+
+# accuracy performance
+perf_acc <- performance(rocr_pred, measure = "acc")
+plot(perf_acc)
+
+ind = which.max( slot(perf_acc, "y.values")[[1]] )
+acc = slot(perf_acc, "y.values")[[1]][ind]
+cutoff = slot(perf_acc, "x.values")[[1]][ind]
+print(c(accuracy= acc, cutoff = cutoff))
+
+# sensitivity vs. specificty
+par(oma=c(3,3,3,3))
+par(mfrow=c(1,1))
+perfspec <- performance(prediction.obj = rocr_pred, measure="spec", x.measure="cutoff")
+plot(perfspec)
+par(new=TRUE)
+perfsens <- performance(prediction.obj = rocr_pred, measure="sens", x.measure="cutoff")
+plot(perfsens)
+
+
+# compute out of sample metrics on the test data set
+predictTest <- predict(logit_train_5, type = "response", newdata = dfTest)
+summary(predictTest)
+summary(predictTrain)
+table(dfTest$HAVESOLAR, predictTest > 0.5)
+
+#auc for test data
+roc_obj_test <- roc(dfTest$HAVESOLAR, predictTest)
+auc(roc_obj_test)
